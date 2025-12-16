@@ -10,11 +10,22 @@ from scanner import evaluate_test
 from dashboard import show_dashboard
 from pdf_report import generate_pdf_report
 
+# ===================== CONSTANTS =====================
 CONFIG_FILE = "llm_config.json"
 SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_SCAN_FILE = "plugins/owasp_llm_top10.json"
 
-# ===================== Helpers =====================
+# ===================== SESSION STATE INIT =====================
+if "scan_results" not in st.session_state:
+    st.session_state["scan_results"] = None
+
+if "scan_name" not in st.session_state:
+    st.session_state["scan_name"] = None
+
+if "last_scan_file" not in st.session_state:
+    st.session_state["last_scan_file"] = None
+
+# ===================== HELPERS =====================
 def load_cfg():
     return json.load(open(CONFIG_FILE)) if os.path.exists(CONFIG_FILE) else {}
 
@@ -27,7 +38,7 @@ def load_scan_from_path(path):
 def save_scan_result(scan_name, cfg, results):
     os.makedirs(SCAN_RESULTS_DIR, exist_ok=True)
     ts = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
-    file_path = f"{SCAN_RESULTS_DIR}/scan_{ts}.json"
+    path = f"{SCAN_RESULTS_DIR}/scan_{ts}.json"
 
     payload = {
         "scan_name": scan_name,
@@ -36,45 +47,50 @@ def save_scan_result(scan_name, cfg, results):
             "base_url": cfg["base_url"],
             "model": cfg["model"]
         },
-        "summary": {
-            "total_tests": len(results),
-            "vulnerabilities": sum(1 for r in results if r["vulnerable"])
-        },
         "results": results
     }
 
-    with open(file_path, "w") as f:
+    with open(path, "w") as f:
         json.dump(payload, f, indent=2)
 
-    return file_path
+    return path
 
 def list_scan_files():
     if not os.path.exists(SCAN_RESULTS_DIR):
         return []
     return sorted(
-        [os.path.join(SCAN_RESULTS_DIR, f) for f in os.listdir(SCAN_RESULTS_DIR)],
+        [
+            os.path.join(SCAN_RESULTS_DIR, f)
+            for f in os.listdir(SCAN_RESULTS_DIR)
+            if f.endswith(".json") and os.path.getsize(os.path.join(SCAN_RESULTS_DIR, f)) > 0
+        ],
         reverse=True
     )
 
 def load_scan_file(path):
-    return json.load(open(path))
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
-# ===================== Page Setup =====================
-st.set_page_config("AI LLM Vulnerability Scanner", "🛡️", "wide")
+# ===================== PAGE SETUP =====================
+st.set_page_config(
+    page_title="AI LLM Vulnerability Scanner",
+    page_icon="🛡️",
+    layout="wide"
+)
+
 st.title("🛡️ AI LLM Vulnerability Scanner")
 
-# ===================== Sidebar – LLM Configuration =====================
+# ===================== SIDEBAR =====================
 st.sidebar.title("🔧 LLM Configuration")
-
 cfg = load_cfg()
 
 base_url = st.sidebar.text_input("Base URL", cfg.get("base_url", ""))
 model = st.sidebar.text_input("Model", cfg.get("model", ""))
 api_key = st.sidebar.text_input("API Key", type="password", value=cfg.get("api_key", ""))
-
-timeout = st.sidebar.number_input(
-    "Timeout (seconds)", min_value=5, max_value=120, value=int(cfg.get("timeout", 60))
-)
+timeout = st.sidebar.number_input("Timeout (seconds)", 5, 120, int(cfg.get("timeout", 60)))
 
 if st.sidebar.button("💾 Save Configuration"):
     save_cfg({
@@ -93,55 +109,50 @@ if not cfg.get("base_url") or not cfg.get("model"):
 llm = LLMClient(cfg)
 st.sidebar.success("LLM Ready")
 
-# ===================== Mode Selection =====================
+# ===================== MODE SELECTION =====================
 mode = st.radio(
     "Mode",
     ["💬 Live Chat", "🧪 Test Scenarios", "📊 Dashboard", "📂 Scan History"],
     horizontal=True
 )
 
-# ===================== Live Chat =====================
+# ===================== LIVE CHAT =====================
 if mode == "💬 Live Chat":
     st.subheader("💬 Live Chat")
 
     if "chat" not in st.session_state:
-        st.session_state.chat = []
+        st.session_state["chat"] = []
 
-    for msg in st.session_state.chat:
+    for msg in st.session_state["chat"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     user_input = st.chat_input("Ask the LLM")
 
     if user_input:
-        st.session_state.chat.append({"role": "user", "content": user_input})
+        st.session_state["chat"].append({"role": "user", "content": user_input})
         with st.chat_message("assistant"):
             response = llm.chat(user_input)
             st.markdown(response)
-            st.session_state.chat.append({"role": "assistant", "content": response})
+            st.session_state["chat"].append({"role": "assistant", "content": response})
 
-# ===================== Test Scenarios =====================
+# ===================== TEST SCENARIOS =====================
 if mode == "🧪 Test Scenarios":
     st.subheader("🧪 Security Test Scenarios")
 
-    # 🔹 Upload option (RESTORED)
     uploaded_scan = st.file_uploader(
         "Upload Scan Pack (JSON)",
         type="json",
-        help="Upload your custom scan pack. If not uploaded, default OWASP scan will be used."
+        help="Upload custom scan pack or use default OWASP scan"
     )
 
-    if uploaded_scan:
-        scan = json.load(uploaded_scan)
-        st.success("Custom scan pack loaded")
-    else:
-        scan = load_scan_from_path(DEFAULT_SCAN_FILE)
-
-    lang = st.selectbox(
-        "Language",
-        ["en", "hi"],
-        index=0
+    scan = (
+        json.load(uploaded_scan)
+        if uploaded_scan
+        else load_scan_from_path(DEFAULT_SCAN_FILE)
     )
+
+    lang = st.selectbox("Language", ["en", "hi"], index=0)
 
     if st.button("▶ Run Scan"):
         agent = ScanAgent(llm, scan)
@@ -151,21 +162,16 @@ if mode == "🧪 Test Scenarios":
 
         st.session_state["scan_results"] = results
         st.session_state["scan_name"] = scan.get("scan_name", "LLM Security Scan")
-
-        # Save scan result
-        result_file = save_scan_result(
-            st.session_state["scan_name"],
-            cfg,
-            results
+        st.session_state["last_scan_file"] = save_scan_result(
+            st.session_state["scan_name"], cfg, results
         )
-        st.session_state["last_scan_file"] = result_file
 
-        st.success("Scan completed and results saved")
+        st.success("Scan completed successfully")
 
-    # ---------- Render Scan Results ----------
-    if "scan_results" in st.session_state:
-        st.markdown("## 🧾 Scan Execution Details")
+    # ---------- Scan Execution Details ----------
+    st.markdown("## 🧾 Scan Execution Details")
 
+    if isinstance(st.session_state["scan_results"], list) and len(st.session_state["scan_results"]) > 0:
         for idx, r in enumerate(st.session_state["scan_results"], 1):
             st.markdown(f"### {idx}. {r['id']} – {r['category']}")
             st.markdown(f"**Severity:** `{r['severity']}`")
@@ -181,82 +187,87 @@ if mode == "🧪 Test Scenarios":
                 st.markdown(r["response"])
 
             with st.expander("📜 Compliance Mapping"):
-                for fw, controls in r["compliance"].items():
+                for fw, controls in r.get("compliance", {}).items():
                     st.write(f"**{fw}**: {', '.join(controls)}")
 
             st.markdown("---")
 
-        # ---------- PDF REPORT ----------
-        pdf_path = generate_pdf_report(
-            st.session_state["scan_name"],
-            cfg,
-            st.session_state["scan_results"]
-        )
+        # ---------- DOWNLOADS ----------
+        if st.session_state["last_scan_file"]:
+            with open(st.session_state["last_scan_file"], "rb") as f:
+                st.download_button(
+                    "⬇️ Download Raw Scan JSON",
+                    f,
+                    file_name=os.path.basename(st.session_state["last_scan_file"]),
+                    mime="application/json"
+                )
 
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "📄 Download Executive PDF Report",
-                f,
-                file_name=os.path.basename(pdf_path),
-                mime="application/pdf"
+            pdf_path = generate_pdf_report(
+                st.session_state["scan_name"],
+                cfg,
+                st.session_state["scan_results"]
             )
 
-        # ---------- RAW JSON ----------
-        with open(st.session_state["last_scan_file"], "r") as f:
-            st.download_button(
-                "⬇️ Download Raw Scan JSON",
-                f,
-                file_name=os.path.basename(st.session_state["last_scan_file"]),
-                mime="application/json"
-            )
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    "📄 Download Executive PDF Report",
+                    f,
+                    file_name=os.path.basename(pdf_path),
+                    mime="application/pdf"
+                )
+    else:
+        st.info("Run a scan to see execution details")
 
-# ===================== Dashboard =====================
+# ===================== DASHBOARD =====================
 if mode == "📊 Dashboard":
-    st.subheader("📊 Security Dashboard")
-
-    if "scan_results" not in st.session_state:
+    if not isinstance(st.session_state["scan_results"], list):
         files = list_scan_files()
         if files:
             data = load_scan_file(files[0])
-            st.session_state["scan_results"] = data["results"]
-            st.info("Loaded latest scan automatically")
+            if data:
+                st.session_state["scan_results"] = data["results"]
 
-    if "scan_results" in st.session_state:
+    if isinstance(st.session_state["scan_results"], list):
         show_dashboard(st.session_state["scan_results"])
     else:
-        st.warning("No scan data available")
+        st.info("No scan data available")
 
-# ===================== Scan History =====================
+# ===================== SCAN HISTORY =====================
 if mode == "📂 Scan History":
     st.subheader("📂 Scan History")
 
     files = list_scan_files()
     if not files:
-        st.info("No previous scans found")
-        st.stop()
+        st.info("No scan history found")
+    else:
+        rows = []
+        for f in files:
+            data = load_scan_file(f)
+            if not data:
+                continue
+            rows.append({
+                "Timestamp": data["executed_at"],
+                "Scan Name": data["scan_name"],
+                "Model": data["llm"]["model"],
+                "Vulnerabilities": sum(
+                    1 for r in data["results"]
+                    if r.get("vulnerable") is True
+                    or r.get("severity", "").lower() in ["medium", "high", "critical"]
+                ),
+                "File": f
+            })
 
-    rows = []
-    for f in files:
-        data = load_scan_file(f)
-        rows.append({
-            "Timestamp": data["executed_at"],
-            "Scan Name": data["scan_name"],
-            "Model": data["llm"]["model"],
-            "Vulnerabilities": data["summary"]["vulnerabilities"],
-            "File": f
-        })
+        df = pd.DataFrame(rows)
+        st.dataframe(df.drop(columns=["File"]), use_container_width=True)
 
-    df = pd.DataFrame(rows)
-    st.dataframe(df.drop(columns=["File"]), use_container_width=True)
+        selected_ts = st.selectbox(
+            "Select scan to load into Dashboard",
+            df["Timestamp"].tolist()
+        )
 
-    selected_ts = st.selectbox(
-        "Select scan to load into Dashboard",
-        df["Timestamp"].tolist()
-    )
-
-    if st.button("🔄 Load Selected Scan"):
-        file_path = df[df["Timestamp"] == selected_ts]["File"].values[0]
-        data = load_scan_file(file_path)
-        st.session_state["scan_results"] = data["results"]
-        st.session_state["scan_name"] = data["scan_name"]
-        st.success("Scan loaded into Dashboard")
+        if st.button("🔄 Load Selected Scan"):
+            file_path = df[df["Timestamp"] == selected_ts]["File"].values[0]
+            data = load_scan_file(file_path)
+            st.session_state["scan_results"] = data["results"]
+            st.session_state["scan_name"] = data["scan_name"]
+            st.success("Scan loaded into Dashboard")
