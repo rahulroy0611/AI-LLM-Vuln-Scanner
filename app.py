@@ -1,204 +1,113 @@
 import streamlit as st
-import json
-import os
+import json, os
 from llm_client import LLMClient
-from scanner import evaluate_response, calculate_score
+from scanner import keyword_check, llm_as_judge
+from reporter import generate_report
 
 CONFIG_FILE = "llm_config.json"
 
-# ------------------ Helpers ------------------
-def load_config():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    return {}
+def load_cfg():
+    return json.load(open(CONFIG_FILE)) if os.path.exists(CONFIG_FILE) else {}
 
-def save_config(cfg):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(cfg, f, indent=2)
+def save_cfg(cfg):
+    json.dump(cfg, open(CONFIG_FILE, "w"), indent=2)
 
-def load_scan(path):
-    with open(path, "r") as f:
-        return json.load(f)
-
-# ------------------ Page Setup ------------------
-st.set_page_config(
-    page_title="AI LLM Vulnerability Scanner",
-    page_icon="🛡️",
-    layout="wide"
-)
-
+st.set_page_config("AI LLM Vulnerability Scanner", "🛡️", "wide")
 st.title("🛡️ AI LLM Vulnerability Scanner")
 
-# =================================================
-# 🔧 SIDEBAR – LLM CONFIGURATION (ALWAYS VISIBLE)
-# =================================================
+# ================= SIDEBAR CONFIG =================
 st.sidebar.title("🔧 LLM Configuration")
+cfg = load_cfg()
 
-existing_cfg = load_config()
+provider = st.sidebar.selectbox("Provider", ["openai","deepseek","gemini","custom"],
+                                index=["openai","deepseek","gemini","custom"].index(cfg.get("provider","custom")))
+base_url = st.sidebar.text_input("Base URL", cfg.get("base_url",""))
+model = st.sidebar.text_input("Model", cfg.get("model",""))
+api_key = st.sidebar.text_input("API Key", type="password", value=cfg.get("api_key",""))
 
-provider = st.sidebar.selectbox(
-    "Provider",
-    ["openai", "deepseek", "gemini", "custom"],
-    index=["openai", "deepseek", "gemini", "custom"].index(
-        existing_cfg.get("provider", "custom")
-    )
-)
-
-base_url = st.sidebar.text_input(
-    "Base URL",
-    value=existing_cfg.get("base_url", "")
-)
-
-model = st.sidebar.text_input(
-    "Model",
-    value=existing_cfg.get("model", "")
-)
-
-api_key = st.sidebar.text_input(
-    "API Key",
-    type="password",
-    value=existing_cfg.get("api_key", "")
-)
-
-timeout = st.sidebar.number_input(
-    "Timeout (seconds)",
-    min_value=5,
-    max_value=120,
-    value=int(existing_cfg.get("timeout", 60))
-)
-
-auth_header = st.sidebar.text_input(
-    "Auth Header",
-    value=existing_cfg.get("auth_header", "Authorization")
-)
-
-auth_prefix = st.sidebar.text_input(
-    "Auth Prefix",
-    value=existing_cfg.get("auth_prefix", "Bearer")
-)
-
-if st.sidebar.button("💾 Save Configuration"):
-    cfg = {
+if st.sidebar.button("💾 Save"):
+    save_cfg({
         "provider": provider,
         "base_url": base_url,
         "model": model,
-        "api_key": api_key,
-        "timeout": timeout,
-        "auth_header": auth_header,
-        "auth_prefix": auth_prefix
-    }
-    save_config(cfg)
-    st.sidebar.success("LLM configuration saved")
+        "api_key": api_key
+    })
+    st.sidebar.success("Saved")
 
-st.sidebar.markdown("---")
-
-config = load_config()
-
-if not config or not config.get("base_url") or not config.get("model"):
-    st.sidebar.warning("LLM not fully configured")
+cfg = load_cfg()
+if not cfg.get("base_url"):
     st.stop()
 
-st.sidebar.success("LLM ready")
+llm = LLMClient(cfg)
 
-llm = LLMClient(config)
+# ================= MODE SELECT =================
+mode = st.radio("Select Mode", ["💬 Live Chat", "🧪 Perform Test Scenarios"], horizontal=True)
 
-# =================================================
-# 🧭 MAIN MODE SELECTION
-# =================================================
-mode = st.radio(
-    "Choose Operation Mode",
-    ["💬 Live Chat", "🧪 Perform Test Scenarios"],
-    horizontal=True
-)
-
-# =================================================
-# 💬 LIVE CHAT MODE
-# =================================================
+# ================= LIVE CHAT =================
 if mode == "💬 Live Chat":
-    st.subheader("💬 Live Chat")
-
     if "chat" not in st.session_state:
         st.session_state.chat = []
 
-    for msg in st.session_state.chat:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    for m in st.session_state.chat:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
 
-    prompt = st.chat_input("Enter your message")
-
-    if prompt:
-        st.session_state.chat.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
+    p = st.chat_input("Ask something")
+    if p:
+        st.session_state.chat.append({"role":"user","content":p})
         with st.chat_message("assistant"):
-            response = llm.chat(prompt)
-            st.markdown(response)
-            st.session_state.chat.append(
-                {"role": "assistant", "content": response}
-            )
+            r = llm.chat(p)
+            st.markdown(r)
+            st.session_state.chat.append({"role":"assistant","content":r})
 
-# =================================================
-# 🧪 TEST SCENARIO MODE
-# =================================================
+# ================= SCAN MODE =================
 if mode == "🧪 Perform Test Scenarios":
-    st.subheader("🧪 Security Test Scenarios")
+    st.subheader("Upload Custom Scan Pack or Use OWASP")
 
-    col1, col2 = st.columns(2)
+    uploaded = st.file_uploader("Upload Scan JSON", type="json")
+    if uploaded:
+        scan = json.load(uploaded)
+    else:
+        scan = json.load(open("scans/owasp_llm_top10.json"))
 
-    with col1:
-        if st.button("OWASP LLM Top 10"):
-            st.session_state.run_owasp = True
-
-    if st.session_state.get("run_owasp"):
-        scan = load_scan("scans/owasp_llm_top10.json")
-
-        st.markdown(f"## {scan['scan_name']}")
-        st.caption(scan["description"])
-
+    if st.button("▶ Execute Scan"):
         results = []
-        progress = st.progress(0)
-        total = len(scan["tests"])
 
-        for i, test in enumerate(scan["tests"], 1):
-            st.markdown(f"### {test['id']} – {test['category']}")
-            st.code(test["prompt"])
+        for t in scan["tests"]:
+            st.markdown(f"### {t['id']} – {t['category']}")
+            st.code(t["prompt"])
 
-            response = llm.chat(test["prompt"])
+            response = llm.chat(t["prompt"])
+            with st.expander("📄 LLM Response"):
+                st.markdown(response)
 
-            vulnerable = evaluate_response(
-                response,
-                test["fail_keywords"]
-            )
+            keyword_vuln = keyword_check(response, t["fail_keywords"])
 
-            status = "❌ Vulnerable" if vulnerable else "✅ Safe"
-            st.markdown(f"**Result:** {status}")
+            judge_raw = llm_as_judge(llm, t["prompt"], response)
+            try:
+                judge = json.loads(judge_raw)
+                vulnerable = judge["vulnerable"]
+                severity = judge["severity"]
+                reason = judge["reason"]
+            except:
+                vulnerable = keyword_vuln
+                severity = "Medium"
+                reason = "Fallback keyword detection"
+
+            st.markdown(f"**Result:** {'❌ Vulnerable' if vulnerable else '✅ Safe'}")
+            st.markdown(f"**Severity:** {severity}")
+            st.markdown(f"**Reason:** {reason}")
 
             results.append({
-                "id": test["id"],
-                "category": test["category"],
-                "vulnerable": vulnerable
+                "id": t["id"],
+                "category": t["category"],
+                "prompt": t["prompt"],
+                "response": response,
+                "vulnerable": vulnerable,
+                "severity": severity,
+                "reason": reason
             })
 
-            progress.progress(i / total)
-
-        score = calculate_score(results)
-
-        # ---------- Summary ----------
-        st.markdown("## 📊 Scan Summary")
-        st.metric("Overall Risk Score", f"{score} / 100")
-
-        vulns = {}
-        for r in results:
-            if r["vulnerable"]:
-                vulns[r["category"]] = vulns.get(r["category"], 0) + 1
-
-        if vulns:
-            st.error("### 🚨 Vulnerabilities Detected")
-            for cat, count in vulns.items():
-                st.write(f"- **{cat}**: {count}")
-        else:
-            st.success("No vulnerabilities detected")
-
-        st.session_state.run_owasp = False
+        report_file = generate_report(scan["scan_name"], results)
+        st.success("Scan Completed")
+        st.download_button("📄 Download Report", open(report_file).read(), file_name=report_file)
