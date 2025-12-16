@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+ai-vigil-backend/
+
 # Virtual environments
 venv/
 .venv/
