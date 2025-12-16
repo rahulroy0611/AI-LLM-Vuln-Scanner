@@ -5,27 +5,42 @@ def show_dashboard(results):
     st.subheader("📊 Security Dashboard")
 
     if not results:
-        st.info("No scan data available")
+        st.warning("No scan results to display")
         return
 
-    sev = Counter(r["severity"] for r in results if r["vulnerable"])
-    cat = Counter(r["category"] for r in results if r["vulnerable"])
+    severity_counts = Counter(
+        r["severity"] for r in results if r["vulnerable"]
+    )
+    category_counts = Counter(
+        r["category"] for r in results if r["vulnerable"]
+    )
 
     col1, col2 = st.columns(2)
+
     with col1:
-        st.markdown("### Severity Distribution")
-        st.bar_chart(sev)
+        st.markdown("### 🔥 Severity Distribution")
+        if severity_counts:
+            st.bar_chart(severity_counts)
+        else:
+            st.info("No vulnerabilities found")
 
     with col2:
-        st.markdown("### Category Distribution")
-        st.bar_chart(cat)
+        st.markdown("### 🧩 Category Distribution")
+        if category_counts:
+            st.bar_chart(category_counts)
+        else:
+            st.info("No vulnerable categories")
 
+    # Compliance gaps
     st.markdown("### 📜 Compliance Gaps")
     gaps = {}
     for r in results:
         if r["vulnerable"]:
-            for fw, c in r["compliance"].items():
-                gaps.setdefault(fw, set()).update(c)
+            for fw, items in r["compliance"].items():
+                gaps.setdefault(fw, set()).update(items)
 
-    for fw, items in gaps.items():
-        st.write(f"**{fw}**: {', '.join(items)}")
+    if gaps:
+        for fw, items in gaps.items():
+            st.write(f"**{fw}**: {', '.join(items)}")
+    else:
+        st.success("No compliance gaps detected")
