@@ -11,7 +11,7 @@ from dashboard import show_dashboard
 from pdf_report import generate_pdf_report
 
 CONFIG_FILE = "llm_config.json"
-SCAN_RESULTS_DIR = "reports/scan_results"
+SCAN_RESULTS_DIR = "scan_results"
 DEFAULT_SCAN_FILE = "plugins/owasp_llm_top10.json"
 
 # ===================== Helpers =====================
