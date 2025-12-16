@@ -2,8 +2,7 @@ import requests
 
 class LLMClient:
     def __init__(self, config):
-        self.provider = config["provider"]
-        self.base_url = config["base_url"]
+        self.base_url = config["base_url"].rstrip("/")
         self.model = config["model"]
         self.api_key = config.get("api_key", "")
         self.timeout = config.get("timeout", 60)
