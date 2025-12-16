@@ -7,6 +7,9 @@ ai-vigil-backend/
 scan_results/*.json
 reports/*.pdf
 
+!scan_results/.gitkeep
+!reports/.gitkeep
+
 # Virtual environments
 venv/
 .venv/
