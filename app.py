@@ -151,7 +151,7 @@ if mode == "🧪 Test Scenarios":
     scan = (
         json.load(uploaded)
         if uploaded
-        else load_scan("scans/owasp_llm_top10.json")
+        else load_scan("plugins/owasp_llm_top10.json")
     )
 
     lang = st.selectbox("Language", ["en", "hi"], index=0)
