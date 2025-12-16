@@ -67,9 +67,5 @@ streamlit run app.py
 - Adjust `llm_client.py` (headers/prefix) for different LLM APIs.
 - Integrate CI to run scans programmatically by importing `ScanAgent` and calling `run()`.
 
-**Next steps**
-- Add a `README.md` license and contribution guide if desired.
-- Optionally add automated tests or example scan runs in a `tests/` folder.
-
 ---
 Generated from repository files.
