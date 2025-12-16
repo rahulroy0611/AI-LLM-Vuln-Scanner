@@ -1,0 +1,9 @@
+{
+  "provider": "custom",
+  "base_url": "http://192.168.1.11:11434/v1",
+  "model": "deepseek-coder:6.7b",
+  "api_key": "",
+  "timeout": 60,
+  "auth_header": "",
+  "auth_prefix": ""
+}
