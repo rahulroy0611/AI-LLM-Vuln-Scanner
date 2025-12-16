@@ -68,4 +68,3 @@ streamlit run app.py
 - Integrate CI to run scans programmatically by importing `ScanAgent` and calling `run()`.
 
 ---
-Generated from repository files.
