@@ -1,0 +1,12 @@
+{
+  "base_url": "http://192.168.1.10:11434/v1",
+  "model": "llama3.2:latest",
+  "api_key": "",
+  "timeout": 60,
+  "judge": {
+    "base_url": "http://192.168.1.10:11434/v1",
+    "model": "deepseek-coder:latest",
+    "api_key": "",
+    "timeout": 60
+  }
+}
